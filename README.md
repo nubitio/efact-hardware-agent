@@ -106,6 +106,18 @@ Lista completa: `GET http://localhost:8765/scale/protocols`
 3. Dejar `protocol = "excell"` y `baud_rate = 9600`
 4. Si el peso no parsea, probar `generic` o capturar una línea cruda desde `raw` en `/scale/weight`
 
+## Conflicto de puerto 8765 (Docker / dev)
+
+El agente escucha en `127.0.0.1:8765`. Si Docker o el stack de desarrollo de eFact publica otro servicio en `*:8765`, las peticiones a `http://localhost:8765` pueden ir a Symfony (404) en lugar del agente.
+
+**Solución:** el POS usa `http://127.0.0.1:8765`. Para probar manualmente:
+
+```bash
+curl http://127.0.0.1:8765/health
+```
+
+Si necesitas liberar el puerto, revisa `docker compose ps` y el mapeo `8765:8765`.
+
 ## Compilar
 
 ```bash
