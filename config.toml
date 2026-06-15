@@ -1,17 +1,30 @@
-# efact-printer-agent configuration
+# efact-hardware-agent configuration
 # Place this file next to the binary, or at:
-#   Linux/Mac: ~/.config/efact-printer-agent/config.toml
-#   Windows:   %APPDATA%\efact-printer-agent\config.toml
+#   Linux/Mac: ~/.config/efact-hardware-agent/config.toml
+#   Windows:   %APPDATA%\efact-hardware-agent\config.toml
 #
-# All fields are optional — defaults work for most Epson/Star thermal printers.
+# Legacy path ~/.config/efact-printer-agent/config.toml is still read on upgrade.
 
 # HTTP port the agent listens on (localhost only)
 port = 8765
 
-# Uncomment and set to target a specific printer by USB IDs (hex strings).
-# Run the agent once to see detected printers: GET http://localhost:8765/printers
-# usb_vendor_id = "04b8"   # Epson
+# ── Printer (all fields optional) ─────────────────────────────────────────────
+# usb_vendor_id = "04b8"
 # usb_product_id = "0202"
-
-# Write chunk size in bytes (default 4096)
 # chunk_size = 4096
+# system_printer_name = "POS_D_BASIC_230"
+# prefer_system_backend = false
+
+# ── Scale (RS-232) ────────────────────────────────────────────────────────────
+[scale]
+enabled = false
+# serial_port = "COM3"              # Windows
+# serial_port = "/dev/ttyUSB0"      # Linux USB-serial adapter
+# serial_port = "/dev/cu.usbserial-1410"  # macOS
+protocol = "excell"                 # excell | cas | toledo | generic | …
+baud_rate = 9600
+data_bits = 8
+parity = "none"
+stop_bits = 1
+stable_reads = 3
+stable_window_ms = 200

@@ -16,29 +16,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux x86_64 (glibc — native build on ubuntu runner, no cross-compilation issues)
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: efact-printer-agent
-            archive: efact-printer-agent-linux-x86_64.tar.gz
+            artifact: efact-hardware-agent
+            archive: efact-hardware-agent-linux-x86_64.tar.gz
 
-          # macOS x86_64
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact: efact-printer-agent
-            archive: efact-printer-agent-macos-x86_64.tar.gz
+            artifact: efact-hardware-agent
+            archive: efact-hardware-agent-macos-x86_64.tar.gz
 
-          # macOS Apple Silicon
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: efact-printer-agent
-            archive: efact-printer-agent-macos-arm64.tar.gz
+            artifact: efact-hardware-agent
+            archive: efact-hardware-agent-macos-arm64.tar.gz
 
-          # Windows x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: efact-printer-agent.exe
-            archive: efact-printer-agent-windows-x86_64.zip
+            artifact: efact-hardware-agent.exe
+            archive: efact-hardware-agent-windows-x86_64.zip
 
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +44,6 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # libudev-dev: hidapi; libgtk-3-dev + libayatana-appindicator3-dev: tray icon
       - name: Install Linux system deps
         if: runner.os == 'Linux'
         run: |
@@ -61,15 +56,12 @@ jobs:
             libayatana-appindicator3-dev \
             libxdo-dev
 
-      # hidapi depends on IOKit on macOS (already present) and hid.dll on Windows (vendored by hidapi crate)
       - name: Install hidapi deps (macOS)
         if: runner.os == 'macOS'
         run: brew install hidapi
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
-
-      # ---------- package ----------
 
       - name: Package (Linux / macOS)
         if: runner.os != 'Windows'

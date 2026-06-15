@@ -1,26 +1,32 @@
-use std::{path::PathBuf, process::Command, thread};
+use std::{process::Command, thread};
 
 use tokio::sync::oneshot;
 use tracing::{error, warn};
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
-    Icon, TrayIconBuilder,
+    TrayIconBuilder,
 };
 use winit::{
     application::ApplicationHandler,
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
 };
 
-use crate::{config::AgentConfig, run_server, AppState};
+use crate::{
+    config::AgentConfig,
+    icon::build_tray_icon,
+    paths::{self, APP_DISPLAY_NAME},
+    run_server, AppState,
+};
 
 #[derive(Debug, Clone)]
 enum UserEvent {
     Menu(MenuEvent),
 }
 
-pub(crate) fn run(config: AgentConfig, state: AppState) {
+pub(crate) fn run(state: AppState) {
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    let port = config.port;
+    let tray_config = state.config_store.get();
+    let port = tray_config.port;
 
     let server_thread = thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -34,12 +40,12 @@ pub(crate) fn run(config: AgentConfig, state: AppState) {
             };
 
             if let Err(err) = run_server(state, port, shutdown).await {
-                error!("Failed to run printer agent server: {err}");
+                error!("Failed to run hardware agent server: {err}");
             }
         });
     });
 
-    if let Err(err) = run_tray_app(config, shutdown_tx) {
+    if let Err(err) = run_tray_app(tray_config, shutdown_tx) {
         error!("Tray application failed: {err}");
     }
 
@@ -47,9 +53,7 @@ pub(crate) fn run(config: AgentConfig, state: AppState) {
 }
 
 fn run_tray_app(config: AgentConfig, shutdown_tx: oneshot::Sender<()>) -> Result<(), String> {
-    let event_loop = EventLoop::<UserEvent>::with_user_event()
-        .build()
-        .map_err(|err| err.to_string())?;
+    let event_loop = build_event_loop()?;
 
     let menu_proxy = event_loop.create_proxy();
     MenuEvent::set_event_handler(Some(move |event| {
@@ -58,6 +62,25 @@ fn run_tray_app(config: AgentConfig, shutdown_tx: oneshot::Sender<()>) -> Result
 
     let mut app = TrayApp::new(config, shutdown_tx, event_loop.create_proxy());
     event_loop.run_app(&mut app).map_err(|err| err.to_string())
+}
+
+fn build_event_loop() -> Result<EventLoop<UserEvent>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+
+        EventLoop::<UserEvent>::with_user_event()
+            .with_activation_policy(ActivationPolicy::Accessory)
+            .build()
+            .map_err(|err| err.to_string())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        EventLoop::<UserEvent>::with_user_event()
+            .build()
+            .map_err(|err| err.to_string())
+    }
 }
 
 struct TrayApp {
@@ -91,11 +114,11 @@ impl TrayApp {
 
     fn build_tray(&mut self) -> Result<(), String> {
         let menu = Menu::new();
-        let status_text = configured_printer_label(&self.config);
+        let status_text = status_label(&self.config);
         let status_item = MenuItem::new(status_text, false, None);
-        let open_config_item = MenuItem::new("Open config folder", true, None);
-        let open_logs_item = MenuItem::new("Open logs folder", true, None);
-        let quit_item = MenuItem::new("Quit", true, None);
+        let open_config_item = MenuItem::new("Abrir configuración", true, None);
+        let open_logs_item = MenuItem::new("Abrir registros", true, None);
+        let quit_item = MenuItem::new("Salir", true, None);
 
         menu.append(&status_item).map_err(|err| err.to_string())?;
         menu.append(&PredefinedMenuItem::separator())
@@ -108,11 +131,11 @@ impl TrayApp {
             .map_err(|err| err.to_string())?;
         menu.append(&quit_item).map_err(|err| err.to_string())?;
 
-        let tooltip = configured_printer_label(&self.config);
+        let tooltip = format!("{APP_DISPLAY_NAME}\n{}", status_label(&self.config));
         let tray_icon = TrayIconBuilder::new()
-            .with_tooltip(format!("eFact Printer Agent\n{tooltip}"))
+            .with_tooltip(tooltip)
             .with_menu(Box::new(menu))
-            .with_icon(build_icon()?)
+            .with_icon(build_tray_icon()?)
             .build()
             .map_err(|err| err.to_string())?;
 
@@ -131,7 +154,7 @@ impl TrayApp {
             .as_ref()
             .is_some_and(|item| event.id == *item.id())
         {
-            if let Err(err) = open_folder(config_dir()) {
+            if let Err(err) = open_folder(paths::config_dir()) {
                 warn!("Failed to open config folder: {err}");
             }
             return;
@@ -142,7 +165,7 @@ impl TrayApp {
             .as_ref()
             .is_some_and(|item| event.id == *item.id())
         {
-            if let Err(err) = open_folder(log_dir()) {
+            if let Err(err) = open_folder(paths::log_dir()) {
                 warn!("Failed to open logs folder: {err}");
             }
             return;
@@ -196,110 +219,26 @@ impl ApplicationHandler<UserEvent> for TrayApp {
     }
 }
 
-fn build_icon() -> Result<Icon, String> {
-    let width = 16usize;
-    let height = 16usize;
-    let mut rgba = vec![0u8; width * height * 4];
+fn status_label(config: &AgentConfig) -> String {
+    let printer = if let Some(name) = &config.printer.system_printer_name {
+        format!("Impresora: {name}")
+    } else if config.printer.prefer_system_backend {
+        "Impresora: sistema (predeterminada)".to_string()
+    } else {
+        "Impresora: auto (HID o sistema)".to_string()
+    };
 
-    for y in 0..height {
-        for x in 0..width {
-            let idx = (y * width + x) * 4;
-            let is_border = x == 0 || y == 0 || x == width - 1 || y == height - 1;
-            let is_paper = (3..=12).contains(&x) && (2..=13).contains(&y);
-            let is_header = is_paper && y <= 4;
-            let is_line = is_paper && matches!(y, 7 | 9 | 11) && (5..=10).contains(&x);
+    let scale = if config.scale.enabled {
+        let port = config.scale.serial_port.as_deref().unwrap_or("sin puerto");
+        format!("Balanza: {} ({})", config.scale.protocol, port)
+    } else {
+        "Balanza: desactivada".to_string()
+    };
 
-            let (r, g, b, a) = if is_border {
-                (26, 43, 60, 255)
-            } else if is_header {
-                (37, 99, 235, 255)
-            } else if is_line {
-                (148, 163, 184, 255)
-            } else if is_paper {
-                (255, 255, 255, 255)
-            } else {
-                (15, 23, 42, 255)
-            };
-
-            rgba[idx] = r;
-            rgba[idx + 1] = g;
-            rgba[idx + 2] = b;
-            rgba[idx + 3] = a;
-        }
-    }
-
-    Icon::from_rgba(rgba, width as u32, height as u32).map_err(|err| err.to_string())
+    format!("{printer} | {scale}")
 }
 
-fn configured_printer_label(config: &AgentConfig) -> String {
-    if let Some(printer_name) = &config.system_printer_name {
-        return format!("Printer: {printer_name}");
-    }
-
-    if config.prefer_system_backend {
-        return "Printer: system default".to_string();
-    }
-
-    "Printer: auto (HID or system default)".to_string()
-}
-
-// ── Platform-specific paths ───────────────────────────────────────────────────
-
-fn config_dir() -> PathBuf {
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var("APPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| std::env::temp_dir())
-            .join("efact-printer-agent")
-    }
-    #[cfg(target_os = "macos")]
-    {
-        std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| std::env::temp_dir())
-            .join(".config")
-            .join("efact-printer-agent")
-    }
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    {
-        std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| std::env::temp_dir())
-            .join(".config")
-            .join("efact-printer-agent")
-    }
-}
-
-pub(crate) fn log_dir() -> PathBuf {
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| std::env::temp_dir())
-            .join("efact-printer-agent")
-    }
-    #[cfg(target_os = "macos")]
-    {
-        std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| std::env::temp_dir())
-            .join("Library")
-            .join("Logs")
-            .join("efact-printer-agent")
-    }
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    {
-        std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| std::env::temp_dir())
-            .join(".local")
-            .join("share")
-            .join("efact-printer-agent")
-    }
-}
-
-fn open_folder(path: PathBuf) -> Result<(), std::io::Error> {
+fn open_folder(path: std::path::PathBuf) -> Result<(), std::io::Error> {
     std::fs::create_dir_all(&path)?;
 
     #[cfg(target_os = "windows")]

@@ -1,121 +1,136 @@
-# efact-printer-agent
+# efact-hardware-agent
 
-Local printer agent for [efact](https://github.com/nubitio). Receives raw ESC/POS bytes from the browser and forwards them either directly to a USB HID thermal printer or through the operating system print spooler.
+Agente local de hardware para [eFact](https://github.com/nubitio). Conecta el POS web con periféricos que el navegador no puede acceder directamente:
 
-## How it works
+- **Impresoras térmicas** ESC/POS (USB HID o spooler del sistema)
+- **Balanzas RS-232** (stream continuo, protocolos comerciales)
+
+## Arquitectura
 
 ```
-efact frontend  →  POST /print (raw ESC/POS)  →  efact-printer-agent  →  HID printer or system spooler
+eFact Web POS  →  localhost:8765  →  efact-hardware-agent  →  impresora / puerto serie
 ```
 
-The agent runs as a background process on the client machine, listening on `localhost:8765`. The efact frontend detects it via the `feature_local_agent_print` tenant flag and posts print jobs directly.
+El agente corre en segundo plano en la máquina del cajero. El POS lo detecta vía `print_method = LOCAL_AGENT` y consulta peso con `GET /scale/weight`.
 
-## Installation
+## Instalación
 
 ### Linux / macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nubitio/efact-print-agent/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/nubitio/efact-hardware-agent/main/install.sh | bash
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/nubitio/efact-print-agent/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/nubitio/efact-hardware-agent/main/install.ps1 | iex
 ```
 
-The installer will:
-- Download the correct binary for your OS and architecture
-- Install it to a local directory and add it to PATH
-- Write a default `config.toml`
-- Register autostart (systemd user service on Linux, LaunchAgent on macOS, Task Scheduler on Windows)
+El instalador descarga el binario, escribe `config.toml`, registra autostart y en macOS usa `ActivationPolicy::Accessory` para **no mostrar icono en el Dock**.
 
 ## API
 
-| Method | Endpoint    | Description                              |
-|--------|-------------|------------------------------------------|
-| GET    | `/health`   | Liveness check → `{ status, version }`  |
-| GET    | `/printers` | List HID and system printers             |
-| POST   | `/print`    | Send raw ESC/POS bytes to printer        |
+### Impresión
 
-`POST /print` expects `Content-Type: application/octet-stream` and returns `204 No Content` on success.
+| Método | Endpoint    | Descripción                    |
+|--------|-------------|--------------------------------|
+| GET    | `/health`   | Estado del agente y servicios  |
+| GET    | `/printers` | Impresoras HID y del sistema   |
+| POST   | `/print`    | Bytes ESC/POS (`octet-stream`) |
 
-By default the agent tries USB HID first and falls back to the system printer backend. Set `prefer_system_backend = true` to reverse that order.
+### Balanza
 
-On Windows, the agent runs as a tray application instead of leaving a console window open. Logs are written to `%LOCALAPPDATA%\efact-printer-agent\agent.log`.
+| Método | Endpoint            | Descripción                              |
+|--------|---------------------|------------------------------------------|
+| GET    | `/scale/protocols`  | Protocolos soportados                    |
+| GET    | `/scale/ports`      | Puertos serie disponibles                |
+| GET    | `/scale/status`     | Conexión, protocolo, último error        |
+| GET    | `/scale/weight`     | Peso actual `{ kg, stable, raw, … }`     |
 
-## Configuration
+`GET /scale/weight` devuelve `stable: true` cuando el peso se mantiene estable el número de lecturas configurado en `stable_reads`.
 
-The agent loads `config.toml` from the first location found:
+## Configuración
 
-1. Next to the binary
-2. `~/.config/efact-printer-agent/config.toml` (Linux/macOS)
-3. `%APPDATA%\efact-printer-agent\config.toml` (Windows)
+Ubicaciones (en orden):
+
+1. Junto al binario (`config.toml`)
+2. `~/.config/efact-hardware-agent/config.toml` (Linux/macOS)
+3. `%APPDATA%\efact-hardware-agent\config.toml` (Windows)
+
+La ruta legada `efact-printer-agent` sigue leyéndose para upgrades.
 
 ```toml
-# HTTP port (default: 8765)
 port = 8765
 
-# Pin a specific printer by USB IDs (hex). If omitted, the first
-# recognized thermal printer is used automatically.
-# Run GET /printers to find your device's VID and PID.
-# usb_vendor_id = "04b8"   # Epson
-# usb_product_id = "0202"
-
-# Write chunk size in bytes (default: 4096)
-# chunk_size = 4096
-
-# Send jobs to a named OS printer instead of the default one.
+# Impresora (campos planos, compatibles con configs anteriores)
+# usb_vendor_id = "04b8"
 # system_printer_name = "POS_D_BASIC_230"
 
-# Try the system print backend before USB HID.
-# prefer_system_backend = true
+[scale]
+enabled = true
+serial_port = "COM3"              # Windows
+# serial_port = "/dev/ttyUSB0"    # Linux
+# serial_port = "/dev/cu.usbserial-1410"  # macOS
+protocol = "excell"
+baud_rate = 9600
+data_bits = 8
+parity = "none"
+stop_bits = 1
+stable_reads = 3
+stable_window_ms = 200
 ```
 
-If multiple system printers are installed and `system_printer_name` is not set, the agent prints to the OS default printer.
+### Protocolos de balanza
 
-Common virtual printers such as `Microsoft Print to PDF` and `Microsoft XPS Document Writer` are excluded from `/printers`.
+| ID | Marcas / uso |
+|----|----------------|
+| `excell` | **Excell** (default, stream continuo ASCII — común en Perú) |
+| `generic` | Cualquier balanza que envíe un número con unidad |
+| `cas` | CAS CI / LP / ER |
+| `toledo` | Mettler Toledo Prix, PS, Tiger |
+| `toledo_stx` | Toledo con tramas STX…ETX |
+| `mettler_sics` | Mettler MT-SICS |
+| `dibal` | Dibal G/M/L (retail) |
+| `kretz` | Kretz ARS / eKO (LATAM) |
+| `magellan` | Magellan / Datalogic |
+| `avery` | Avery Berkel |
+| `rahul` | Formato fijo `+00000.000kg` (variante china) |
 
-### Supported printers
+Lista completa: `GET http://localhost:8765/scale/protocols`
 
-Any USB HID thermal printer is supported. The following vendors are detected automatically:
+### Configurar balanza Excell (sin modelo exacto)
 
-| Vendor        | VID    |
-|---------------|--------|
-| Epson         | `04B8` |
-| Star Micronics| `0519` |
-| Bixolon       | `1504` |
-| Citizen       | `1CBE` |
-| Sewoo         | `0DD4` |
-| Rongta        | `20D1` |
-| Xprinter      | `0FE6`, `6868` |
+1. Conectar adaptador USB ↔ RS-232
+2. `GET /scale/ports` para ver el puerto
+3. Dejar `protocol = "excell"` y `baud_rate = 9600`
+4. Si el peso no parsea, probar `generic` o capturar una línea cruda desde `raw` en `/scale/weight`
 
-If your printer is not detected automatically, add its `usb_vendor_id` and `usb_product_id` to `config.toml`.
-
-## Building from source
+## Compilar
 
 ```bash
-git clone https://github.com/nubitio/efact-print-agent.git
-cd efact-print-agent
 cargo build --release
-# binary at target/release/efact-printer-agent
+# binario en target/release/efact-hardware-agent
 ```
 
-**Requirements:** Rust 1.75+, `libudev-dev` on Linux (`sudo apt install libudev-dev`).
+**Requisitos:** Rust 1.75+, `libudev-dev` en Linux.
 
-## Releases
+## Configuración
 
-Binaries for all platforms are built automatically on every tagged release via GitHub Actions.
+Puedes configurar el agente de dos formas:
 
-| Platform        | Download                                        |
-|-----------------|-------------------------------------------------|
-| Linux x86_64    | `efact-printer-agent-linux-x86_64.tar.gz`      |
-| macOS x86_64    | `efact-printer-agent-macos-x86_64.tar.gz`      |
-| macOS ARM64     | `efact-printer-agent-macos-arm64.tar.gz`        |
-| Windows x86_64  | `efact-printer-agent-windows-x86_64.zip`        |
+1. **POS web** — botón *Hardware local* en el header del POS (`GET/PUT /config`)
+2. **Bandeja del sistema** — menú → *Abrir configuración* (abre la carpeta con `config.toml`)
 
-→ [Latest release](https://github.com/nubitio/efact-print-agent/releases/latest)
+Un panel nativo de configuración en Rust (ventana propia del agente) está planificado; por ahora el POS web cubre impresora, balanza y guía de cableado.
 
-## License
+## Migración desde efact-printer-agent
+
+- Binario renombrado a `efact-hardware-agent`
+- El instalador crea symlink `efact-printer-agent` → nuevo binario
+- Configs legadas en `~/.config/efact-printer-agent/` siguen funcionando
+- Misma URL: `http://localhost:8765`
+
+## Licencia
 
 MIT

@@ -1,11 +1,11 @@
 [package]
-name = "efact-printer-agent"
-version = "0.3.4"
+name = "efact-hardware-agent"
+version = "0.4.0"
 edition = "2021"
-description = "Local USB printer agent for efact ESC/POS printing"
+description = "Local hardware agent for eFact POS — thermal printers and RS-232 scales"
 
 [[bin]]
-name = "efact-printer-agent"
+name = "efact-hardware-agent"
 path = "src/main.rs"
 
 [dependencies]
@@ -16,12 +16,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 hidapi = "2"
+serialport = "4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "1"
 
-# Tray icon and event loop — supported on Windows, macOS, and Linux.
-# Linux additionally requires libappindicator3 (apt: libayatana-appindicator3-dev).
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
 tracing-appender = "0.2"
 tray-icon = "0.22"

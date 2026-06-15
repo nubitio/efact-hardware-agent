@@ -1,21 +1,28 @@
-use serde::Deserialize;
-use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
 
 /// Configuration loaded from `config.toml` next to the binary,
-/// or from `~/.config/efact-printer-agent/config.toml` as fallback.
-/// All fields have sensible defaults so the agent works out-of-the-box.
-#[derive(Debug, Deserialize, Clone)]
+/// or from `~/.config/efact-hardware-agent/config.toml` as fallback.
+/// Legacy `efact-printer-agent` paths are still read for upgrades.
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AgentConfig {
     /// HTTP port to listen on. Default: 8765
     #[serde(default = "default_port")]
     pub port: u16,
 
+    /// Printer settings. Top-level keys remain supported for legacy configs.
+    #[serde(default, flatten)]
+    pub printer: PrinterConfig,
+
+    #[serde(default)]
+    pub scale: ScaleConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct PrinterConfig {
     /// Specific USB vendor_id to target (hex string, e.g. "04b8" for Epson).
-    /// If None, the agent tries all known thermal printer vendor IDs.
     pub usb_vendor_id: Option<String>,
 
     /// Specific USB product_id to target (hex string).
-    /// If None, the first matching device is used.
     pub usb_product_id: Option<String>,
 
     /// USB output endpoint address. Default: 0x01 (most thermal printers).
@@ -27,12 +34,45 @@ pub struct AgentConfig {
     pub chunk_size: usize,
 
     /// Optional system printer name to target through the OS print spooler.
-    /// If omitted, the default system printer is used.
     pub system_printer_name: Option<String>,
 
     /// Prefer the system print backend before trying USB HID.
     #[serde(default)]
     pub prefer_system_backend: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ScaleConfig {
+    /// Enable RS-232 scale integration.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Serial port path, e.g. COM3, /dev/ttyUSB0, /dev/cu.usbserial-*
+    pub serial_port: Option<String>,
+
+    /// Scale protocol. See GET /scale/protocols for supported values.
+    #[serde(default = "default_scale_protocol")]
+    pub protocol: String,
+
+    #[serde(default = "default_baud_rate")]
+    pub baud_rate: u32,
+
+    #[serde(default = "default_data_bits")]
+    pub data_bits: u8,
+
+    #[serde(default = "default_parity")]
+    pub parity: String,
+
+    #[serde(default = "default_stop_bits")]
+    pub stop_bits: u8,
+
+    /// Identical consecutive readings required to mark weight as stable.
+    #[serde(default = "default_stable_reads")]
+    pub stable_reads: u8,
+
+    /// Minimum milliseconds between identical readings for stability.
+    #[serde(default = "default_stable_window_ms")]
+    pub stable_window_ms: u64,
 }
 
 fn default_port() -> u16 {
@@ -47,10 +87,37 @@ fn default_chunk_size() -> usize {
     4096
 }
 
-impl Default for AgentConfig {
+fn default_scale_protocol() -> String {
+    "excell".to_string()
+}
+
+fn default_baud_rate() -> u32 {
+    9600
+}
+
+fn default_data_bits() -> u8 {
+    8
+}
+
+fn default_parity() -> String {
+    "none".to_string()
+}
+
+fn default_stop_bits() -> u8 {
+    1
+}
+
+fn default_stable_reads() -> u8 {
+    3
+}
+
+fn default_stable_window_ms() -> u64 {
+    200
+}
+
+impl Default for PrinterConfig {
     fn default() -> Self {
         Self {
-            port: default_port(),
             usb_vendor_id: None,
             usb_product_id: None,
             usb_endpoint: default_endpoint(),
@@ -61,61 +128,28 @@ impl Default for AgentConfig {
     }
 }
 
-impl AgentConfig {
-    pub fn load() -> Self {
-        // 1. Next to the binary
-        let exe_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.join("config.toml")));
-
-        // 2. ~/.config/efact-printer-agent/config.toml
-        let user_config = dirs_config_path();
-
-        let candidates = [exe_dir, user_config]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-
-        for path in &candidates {
-            if path.exists() {
-                match std::fs::read_to_string(path) {
-                    Ok(contents) => match toml::from_str::<AgentConfig>(&contents) {
-                        Ok(cfg) => {
-                            tracing::info!("Loaded config from {}", path.display());
-                            return cfg;
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to parse {}: {e}", path.display());
-                        }
-                    },
-                    Err(e) => {
-                        tracing::warn!("Failed to read {}: {e}", path.display());
-                    }
-                }
-            }
+impl Default for ScaleConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            serial_port: None,
+            protocol: default_scale_protocol(),
+            baud_rate: default_baud_rate(),
+            data_bits: default_data_bits(),
+            parity: default_parity(),
+            stop_bits: default_stop_bits(),
+            stable_reads: default_stable_reads(),
+            stable_window_ms: default_stable_window_ms(),
         }
-
-        tracing::info!("No config.toml found, using defaults");
-        AgentConfig::default()
     }
 }
 
-fn dirs_config_path() -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var("APPDATA").ok().map(|d| {
-            PathBuf::from(d)
-                .join("efact-printer-agent")
-                .join("config.toml")
-        })
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::env::var("HOME").ok().map(|h| {
-            PathBuf::from(h)
-                .join(".config")
-                .join("efact-printer-agent")
-                .join("config.toml")
-        })
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            port: default_port(),
+            printer: PrinterConfig::default(),
+            scale: ScaleConfig::default(),
+        }
     }
 }

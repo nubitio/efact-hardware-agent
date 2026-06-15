@@ -37,7 +37,7 @@ impl SystemPrinterManager {
     }
 
     pub fn print(&self, data: &[u8]) -> Result<(), SystemPrinterError> {
-        print_with_system_backend(data, self.config.system_printer_name.as_deref())
+        print_with_system_backend(data, self.config.printer.system_printer_name.as_deref())
     }
 }
 
