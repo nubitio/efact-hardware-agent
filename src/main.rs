@@ -231,16 +231,20 @@ async fn scale_weight(
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({ "error": ScaleError::Disabled.to_string() })),
         )),
-        Err(ScaleError::NoReading) => Ok(Json(json!({
-            "kg": null,
-            "value": null,
-            "stable": false,
-            "connected": state.scale.status().connected,
-            "protocol": state.scale.status().protocol,
-            "port": state.scale.status().port,
-            "raw": null,
-            "updated_at_ms": 0,
-        }))),
+        Err(ScaleError::NoReading) => {
+            let status = state.scale.status();
+            Ok(Json(json!({
+                "kg": null,
+                "value": null,
+                "stable": false,
+                "connected": status.connected,
+                "protocol": status.protocol,
+                "port": status.port,
+                "last_error": status.last_error,
+                "raw": null,
+                "updated_at_ms": 0,
+            })))
+        }
         Err(err) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": err.to_string() })),

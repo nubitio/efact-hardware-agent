@@ -193,14 +193,18 @@ fn run_supervisor(
         let reader_status = Arc::clone(&status);
 
         let reader_handle = thread::spawn(move || {
-            let _ = run_reader(
+            if let Err(err) = run_reader(
                 &reader_config,
                 protocol,
                 &reader_port,
                 &reader_reading,
                 &reader_status,
                 &stop_rx,
-            );
+            ) {
+                let message = format!("Scale reader error on {reader_port}: {err}");
+                tracing::error!("{message}");
+                set_error(&reader_status, &message);
+            }
         });
 
         loop {
