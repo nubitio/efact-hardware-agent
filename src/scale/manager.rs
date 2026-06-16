@@ -371,6 +371,27 @@ fn publish_reading(
 }
 
 fn open_port(config: &ScaleConfig, port_name: &str) -> Result<Box<dyn SerialPort>, ScaleError> {
+    let mut last_error = None;
+    for attempt in 1..=5 {
+        match open_port_once(config, port_name) {
+            Ok(port) => {
+                if attempt > 1 {
+                    tracing::info!("Scale port {port_name} opened after {attempt} attempts");
+                }
+                return Ok(port);
+            }
+            Err(err) => {
+                tracing::warn!("Scale port {port_name} open attempt {attempt}/5 failed: {err}");
+                last_error = Some(err);
+                thread::sleep(Duration::from_millis(300));
+            }
+        }
+    }
+
+    Err(last_error.expect("scale port open attempts should record an error"))
+}
+
+fn open_port_once(config: &ScaleConfig, port_name: &str) -> Result<Box<dyn SerialPort>, ScaleError> {
     let parity = match config.parity.to_ascii_lowercase().as_str() {
         "even" => Parity::Even,
         "odd" => Parity::Odd,
@@ -389,13 +410,32 @@ fn open_port(config: &ScaleConfig, port_name: &str) -> Result<Box<dyn SerialPort
         _ => StopBits::One,
     };
 
-    let port = serialport::new(port_name, config.baud_rate)
+    let builder = serialport::new(port_name, config.baud_rate)
         .data_bits(data_bits)
         .parity(parity)
         .stop_bits(stop_bits)
         .flow_control(FlowControl::None)
-        .timeout(Duration::from_millis(200))
-        .open()?;
+        .timeout(Duration::from_millis(200));
+
+    let port = match builder.open() {
+        Ok(port) => port,
+        Err(err) => {
+            #[cfg(target_os = "windows")]
+            {
+                tracing::warn!(
+                    "Opening scale port {port_name} with full serial settings failed: {err}. Retrying with minimal settings."
+                );
+                serialport::new(port_name, config.baud_rate)
+                    .timeout(Duration::from_millis(200))
+                    .open()?
+            }
+
+            #[cfg(not(target_os = "windows"))]
+            {
+                return Err(err.into());
+            }
+        }
+    };
 
     Ok(port)
 }
