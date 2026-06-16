@@ -320,6 +320,8 @@ fn extract_decimal(input: &str) -> Option<f64> {
             }
             token.push(ch);
             started = true;
+        } else if ch.is_ascii_whitespace() && (token == "+" || token == "-") {
+            continue;
         } else if started {
             break;
         }
@@ -361,5 +363,14 @@ mod tests {
             .parse_line("S S     0.125 kg")
             .unwrap();
         assert!((parsed.value - 0.125).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn generic_status_line_with_spaced_sign() {
+        let parsed = ScaleProtocol::Generic
+            .parse_line("ST,GS,+  0.435kg")
+            .unwrap();
+        assert!((parsed.value - 0.435).abs() < f64::EPSILON);
+        assert_eq!(parsed.unit, WeightUnit::Kg);
     }
 }
