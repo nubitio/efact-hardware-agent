@@ -1,4 +1,5 @@
 use std::{
+    io::Read,
     sync::{
         mpsc::{self, Receiver, Sender},
         Arc, RwLock,
@@ -8,7 +9,7 @@ use std::{
 };
 
 use serde::Serialize;
-use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
+use serialport::{DataBits, FlowControl, Parity, StopBits};
 use thiserror::Error;
 
 use crate::config::ScaleConfig;
@@ -370,7 +371,7 @@ fn publish_reading(
     }
 }
 
-fn open_port(config: &ScaleConfig, port_name: &str) -> Result<Box<dyn SerialPort>, ScaleError> {
+fn open_port(config: &ScaleConfig, port_name: &str) -> Result<Box<dyn Read + Send>, ScaleError> {
     let mut last_error = None;
     for attempt in 1..=5 {
         match open_port_once(config, port_name) {
@@ -391,7 +392,10 @@ fn open_port(config: &ScaleConfig, port_name: &str) -> Result<Box<dyn SerialPort
     Err(last_error.expect("scale port open attempts should record an error"))
 }
 
-fn open_port_once(config: &ScaleConfig, port_name: &str) -> Result<Box<dyn SerialPort>, ScaleError> {
+fn open_port_once(
+    config: &ScaleConfig,
+    port_name: &str,
+) -> Result<Box<dyn Read + Send>, ScaleError> {
     let parity = match config.parity.to_ascii_lowercase().as_str() {
         "even" => Parity::Even,
         "odd" => Parity::Odd,
@@ -425,9 +429,18 @@ fn open_port_once(config: &ScaleConfig, port_name: &str) -> Result<Box<dyn Seria
                 tracing::warn!(
                     "Opening scale port {port_name} with full serial settings failed: {err}. Retrying with minimal settings."
                 );
-                serialport::new(port_name, config.baud_rate)
+                match serialport::new(port_name, config.baud_rate)
                     .timeout(Duration::from_millis(200))
-                    .open()?
+                    .open()
+                {
+                    Ok(port) => port,
+                    Err(minimal_err) => {
+                        tracing::warn!(
+                            "Opening scale port {port_name} with minimal serial settings failed: {minimal_err}. Retrying with raw Win32 reads."
+                        );
+                        return open_raw_windows_port(port_name);
+                    }
+                }
             }
 
             #[cfg(not(target_os = "windows"))]
@@ -438,6 +451,13 @@ fn open_port_once(config: &ScaleConfig, port_name: &str) -> Result<Box<dyn Seria
     };
 
     Ok(port)
+}
+
+#[cfg(target_os = "windows")]
+fn open_raw_windows_port(port_name: &str) -> Result<Box<dyn Read + Send>, ScaleError> {
+    RawWindowsSerialPort::open(port_name)
+        .map(|port| Box::new(port) as Box<dyn Read + Send>)
+        .map_err(ScaleError::Io)
 }
 
 struct StabilityTracker {
@@ -479,4 +499,102 @@ fn unix_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(target_os = "windows")]
+struct RawWindowsSerialPort {
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+
+#[cfg(target_os = "windows")]
+impl RawWindowsSerialPort {
+    fn open(port_name: &str) -> std::io::Result<Self> {
+        use std::{ffi::OsStr, os::windows::ffi::OsStrExt, ptr::null_mut};
+
+        use windows_sys::Win32::{
+            Devices::Communication::{SetCommTimeouts, COMMTIMEOUTS},
+            Foundation::INVALID_HANDLE_VALUE,
+            Storage::FileSystem::{
+                CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
+                OPEN_EXISTING,
+            },
+        };
+
+        let device_name = format!(r"\\.\{port_name}");
+        let wide_name: Vec<u16> = OsStr::new(&device_name)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let handle = unsafe {
+            CreateFileW(
+                wide_name.as_ptr(),
+                FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+                0,
+                null_mut(),
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                null_mut(),
+            )
+        };
+
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        let mut timeouts = COMMTIMEOUTS {
+            ReadIntervalTimeout: 100,
+            ReadTotalTimeoutMultiplier: 0,
+            ReadTotalTimeoutConstant: 200,
+            WriteTotalTimeoutMultiplier: 0,
+            WriteTotalTimeoutConstant: 200,
+        };
+
+        let timeout_ok = unsafe { SetCommTimeouts(handle, &mut timeouts) } != 0;
+        if !timeout_ok {
+            let err = std::io::Error::last_os_error();
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(handle);
+            }
+            return Err(err);
+        }
+
+        tracing::info!("Scale port {port_name} opened with raw Win32 serial fallback");
+        Ok(Self { handle })
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Read for RawWindowsSerialPort {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use std::ptr::null_mut;
+
+        use windows_sys::Win32::Storage::FileSystem::ReadFile;
+
+        let mut bytes_read = 0u32;
+        let ok = unsafe {
+            ReadFile(
+                self.handle,
+                buf.as_mut_ptr().cast(),
+                buf.len().min(u32::MAX as usize) as u32,
+                &mut bytes_read,
+                null_mut(),
+            )
+        } != 0;
+
+        if ok {
+            Ok(bytes_read as usize)
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for RawWindowsSerialPort {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.handle);
+        }
+    }
 }
