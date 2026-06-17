@@ -507,6 +507,36 @@ struct RawWindowsSerialPort {
 }
 
 #[cfg(target_os = "windows")]
+const GENERIC_READ: u32 = 0x8000_0000;
+#[cfg(target_os = "windows")]
+const GENERIC_WRITE: u32 = 0x4000_0000;
+#[cfg(target_os = "windows")]
+const OPEN_EXISTING: u32 = 3;
+#[cfg(target_os = "windows")]
+const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
+
+#[cfg(target_os = "windows")]
+extern "system" {
+    fn CreateFileW(
+        lpFileName: *const u16,
+        dwDesiredAccess: u32,
+        dwShareMode: u32,
+        lpSecurityAttributes: *mut std::ffi::c_void,
+        dwCreationDisposition: u32,
+        dwFlagsAndAttributes: u32,
+        hTemplateFile: *mut std::ffi::c_void,
+    ) -> windows_sys::Win32::Foundation::HANDLE;
+
+    fn ReadFile(
+        hFile: windows_sys::Win32::Foundation::HANDLE,
+        lpBuffer: *mut std::ffi::c_void,
+        nNumberOfBytesToRead: u32,
+        lpNumberOfBytesRead: *mut u32,
+        lpOverlapped: *mut std::ffi::c_void,
+    ) -> i32;
+}
+
+#[cfg(target_os = "windows")]
 impl RawWindowsSerialPort {
     fn open(port_name: &str) -> std::io::Result<Self> {
         use std::{ffi::OsStr, os::windows::ffi::OsStrExt, ptr::null_mut};
@@ -514,10 +544,6 @@ impl RawWindowsSerialPort {
         use windows_sys::Win32::{
             Devices::Communication::{SetCommTimeouts, COMMTIMEOUTS},
             Foundation::INVALID_HANDLE_VALUE,
-            Storage::FileSystem::{
-                FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE, OPEN_EXISTING,
-            },
-            System::IO::CreateFileW,
         };
 
         let device_name = format!(r"\\.\{port_name}");
@@ -529,7 +555,7 @@ impl RawWindowsSerialPort {
         let handle = unsafe {
             CreateFileW(
                 wide_name.as_ptr(),
-                FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+                GENERIC_READ | GENERIC_WRITE,
                 0,
                 null_mut(),
                 OPEN_EXISTING,
@@ -571,8 +597,6 @@ unsafe impl Send for RawWindowsSerialPort {}
 impl Read for RawWindowsSerialPort {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         use std::ptr::null_mut;
-
-        use windows_sys::Win32::System::IO::ReadFile;
 
         let mut bytes_read = 0u32;
         let ok = unsafe {
