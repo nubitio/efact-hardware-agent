@@ -515,9 +515,9 @@ impl RawWindowsSerialPort {
             Devices::Communication::{SetCommTimeouts, COMMTIMEOUTS},
             Foundation::INVALID_HANDLE_VALUE,
             Storage::FileSystem::{
-                CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
-                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE, OPEN_EXISTING,
             },
+            System::IO::CreateFileW,
         };
 
         let device_name = format!(r"\\.\{port_name}");
@@ -565,11 +565,14 @@ impl RawWindowsSerialPort {
 }
 
 #[cfg(target_os = "windows")]
+unsafe impl Send for RawWindowsSerialPort {}
+
+#[cfg(target_os = "windows")]
 impl Read for RawWindowsSerialPort {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         use std::ptr::null_mut;
 
-        use windows_sys::Win32::Storage::FileSystem::ReadFile;
+        use windows_sys::Win32::System::IO::ReadFile;
 
         let mut bytes_read = 0u32;
         let ok = unsafe {

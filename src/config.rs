@@ -9,6 +9,10 @@ pub struct AgentConfig {
     #[serde(default = "default_port")]
     pub port: u16,
 
+    /// Tray icon style: auto, color, dark, or light.
+    #[serde(default = "default_tray_icon")]
+    pub tray_icon: String,
+
     /// Printer settings. Top-level keys remain supported for legacy configs.
     #[serde(default, flatten)]
     pub printer: PrinterConfig,
@@ -77,6 +81,10 @@ pub struct ScaleConfig {
 
 fn default_port() -> u16 {
     8765
+}
+
+fn default_tray_icon() -> String {
+    "auto".to_string()
 }
 
 fn default_endpoint() -> u8 {
@@ -148,6 +156,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             port: default_port(),
+            tray_icon: default_tray_icon(),
             printer: PrinterConfig::default(),
             scale: ScaleConfig::default(),
         }

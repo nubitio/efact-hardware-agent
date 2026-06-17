@@ -84,6 +84,8 @@ pub struct AgentConfigUpdate {
     #[serde(default)]
     pub port: Option<u16>,
     #[serde(default)]
+    pub tray_icon: Option<String>,
+    #[serde(default)]
     pub printer: Option<PrinterConfigUpdate>,
     #[serde(default)]
     pub scale: Option<crate::config::ScaleConfig>,
@@ -105,6 +107,10 @@ impl AgentConfigUpdate {
 
         if let Some(port) = self.port {
             next.port = port;
+        }
+
+        if let Some(tray_icon) = self.tray_icon {
+            next.tray_icon = tray_icon;
         }
 
         if let Some(printer) = self.printer {

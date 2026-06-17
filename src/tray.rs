@@ -135,7 +135,7 @@ impl TrayApp {
         let tray_icon = TrayIconBuilder::new()
             .with_tooltip(tooltip)
             .with_menu(Box::new(menu))
-            .with_icon(build_tray_icon()?)
+            .with_icon(build_tray_icon(&self.config.tray_icon)?)
             .build()
             .map_err(|err| err.to_string())?;
 

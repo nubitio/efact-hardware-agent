@@ -1,6 +1,6 @@
 [package]
 name = "efact-hardware-agent"
-version = "0.4.4"
+version = "0.4.5"
 edition = "2021"
 description = "Local hardware agent for eFact POS — thermal printers and RS-232 scales"
 
@@ -27,7 +27,7 @@ tray-icon = "0.22"
 winit = "0.30"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Devices_Communication", "Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.59", features = ["Win32_Devices_Communication", "Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO"] }
 
 [profile.release]
 opt-level = "z"
