@@ -96,7 +96,7 @@ fn default_chunk_size() -> usize {
 }
 
 fn default_scale_protocol() -> String {
-    "excell".to_string()
+    "generic".to_string()
 }
 
 fn default_baud_rate() -> u32 {

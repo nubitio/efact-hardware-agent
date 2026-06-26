@@ -81,8 +81,9 @@ fi
 # Keep legacy symlink so existing LaunchAgents/systemd units keep working.
 ln -sf "${INSTALL_DIR}/${BINARY}" "${INSTALL_DIR}/${LEGACY_BINARY}" 2>/dev/null || true
 
+mkdir -p "${CONFIG_DIR}"
+
 if [ ! -f "${CONFIG_DIR}/config.toml" ]; then
-  mkdir -p "${CONFIG_DIR}"
   if [ -f "${LEGACY_CONFIG_DIR}/config.toml" ]; then
     cp "${LEGACY_CONFIG_DIR}/config.toml" "${CONFIG_DIR}/config.toml"
     info "Migrated config from ${LEGACY_CONFIG_DIR}/config.toml"
@@ -90,6 +91,11 @@ if [ ! -f "${CONFIG_DIR}/config.toml" ]; then
     cp "${TMP}/config.toml" "${CONFIG_DIR}/config.toml"
     info "Default config written to ${CONFIG_DIR}/config.toml"
   fi
+fi
+
+if [ -f "${TMP}/config.toml.example" ]; then
+  cp "${TMP}/config.toml.example" "${CONFIG_DIR}/config.toml.example"
+  ok "Reference config: ${CONFIG_DIR}/config.toml.example"
 fi
 
 setup_systemd() {
@@ -162,5 +168,5 @@ elif [ "${OS}" = "Darwin" ]; then
 fi
 
 ok "efact-hardware-agent ${TAG} installed successfully."
-ok "Agent running on http://localhost:8765"
+ok "Agent running on http://127.0.0.1:8765"
 ok "Config: ${CONFIG_DIR}/config.toml"

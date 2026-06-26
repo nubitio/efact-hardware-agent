@@ -1,27 +1,14 @@
-# efact-hardware-agent configuration
-# Place this file next to the binary, or at:
-#   Linux/Mac: ~/.config/efact-hardware-agent/config.toml
-#   Windows:   %APPDATA%\efact-hardware-agent\config.toml
-#
-# Legacy path ~/.config/efact-printer-agent/config.toml is still read on upgrade.
+# efact-hardware-agent — live configuration
+# See config.toml.example in this folder for commented reference (not overwritten on save).
 
-# HTTP port the agent listens on (localhost only)
 port = 8765
 
-# ── Printer (all fields optional) ─────────────────────────────────────────────
-# usb_vendor_id = "04b8"
-# usb_product_id = "0202"
-# chunk_size = 4096
-# system_printer_name = "POS_D_BASIC_230"
 # prefer_system_backend = false
+# system_printer_name = "POS_D_BASIC_230"
 
-# ── Scale (RS-232) ────────────────────────────────────────────────────────────
 [scale]
 enabled = false
-# serial_port = "COM3"              # Windows
-# serial_port = "/dev/ttyUSB0"      # Linux USB-serial adapter
-# serial_port = "/dev/cu.usbserial-1410"  # macOS
-protocol = "excell"                 # excell | cas | toledo | generic | …
+protocol = "generic"
 baud_rate = 9600
 data_bits = 8
 parity = "none"

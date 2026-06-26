@@ -66,19 +66,20 @@ jobs:
       - name: Package (Linux / macOS)
         if: runner.os != 'Windows'
         run: |
-          cp config.toml target/${{ matrix.target }}/release/
+          cp config.toml config.toml.example target/${{ matrix.target }}/release/
           cd target/${{ matrix.target }}/release
-          tar czf "../../../${{ matrix.archive }}" ${{ matrix.artifact }} config.toml
+          tar czf "../../../${{ matrix.archive }}" ${{ matrix.artifact }} config.toml config.toml.example
           cd -
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Copy-Item config.toml "target\${{ matrix.target }}\release\"
+          Copy-Item config.toml, config.toml.example "target\${{ matrix.target }}\release\"
           Compress-Archive `
             -Path "target\${{ matrix.target }}\release\${{ matrix.artifact }}", `
-                  "target\${{ matrix.target }}\release\config.toml" `
+                  "target\${{ matrix.target }}\release\config.toml", `
+                  "target\${{ matrix.target }}\release\config.toml.example" `
             -DestinationPath "${{ matrix.archive }}"
 
       - name: Upload artifact

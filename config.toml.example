@@ -1,0 +1,70 @@
+# efact-hardware-agent — reference configuration (English)
+#
+# This file is NOT overwritten by the agent or the POS. Copy fields into config.toml
+# when you need advanced settings. The live file is config.toml in this folder.
+#
+# Locations (first match wins):
+#   1. config.toml next to the binary
+#   2. ~/.config/efact-hardware-agent/config.toml   (Linux / macOS)
+#   3. %APPDATA%\efact-hardware-agent\config.toml (Windows)
+#
+# Legacy path ~/.config/efact-printer-agent/config.toml is still read on upgrade.
+#
+# After editing config.toml, restart the agent (tray → Quit, or relaunch LaunchAgent)
+# unless you saved from the POS (scale reconnects automatically on PUT /config).
+
+# HTTP port (agent binds 127.0.0.1 only — not reachable from other machines)
+port = 8765
+
+# ── Printer ───────────────────────────────────────────────────────────────────
+# The POS can set prefer_system_backend and system_printer_name via Hardware local.
+# USB HID is tried when prefer_system_backend = false.
+
+# prefer_system_backend = false
+# system_printer_name = "POS_D_BASIC_230"   # exact name from GET /printers
+
+# Optional USB targeting (hex strings, no 0x prefix):
+# usb_vendor_id = "04b8"    # Epson
+# usb_product_id = "0202"
+# usb_endpoint = 1          # default 0x01
+# chunk_size = 4096
+
+# ── Scale (RS-232) ────────────────────────────────────────────────────────────
+# The POS enables the scale and picks the serial port. Technicians tune protocol
+# and serial parameters here when generic parsing is not enough.
+
+[scale]
+enabled = false
+
+# List ports: curl http://127.0.0.1:8765/scale/ports
+# serial_port = "COM3"                        # Windows
+# serial_port = "/dev/ttyUSB0"                # Linux USB-serial adapter
+# serial_port = "/dev/cu.usbserial-1410"      # macOS USB-serial adapter
+# serial_port = "/dev/ttyS0"                  # Linux built-in RS-232
+
+# Protocol IDs (full list: GET /scale/protocols):
+#   generic      — extract first decimal from each line (POS default)
+#   excell       — Excell continuous ASCII stream (common in Peru retail)
+#   cas          — CAS CI / LP / ER (WGT:, WT prefixes)
+#   toledo       — Mettler Toledo Prix, PS, Tiger
+#   toledo_stx   — Toledo STX…ETX framed lines
+#   mettler_sics — Mettler MT-SICS (S S, SI responses)
+#   dibal        — Dibal G/M/L retail scales
+#   kretz        — Kretz ARS / eKO (LATAM)
+#   magellan     — Magellan / Datalogic scanner-scales
+#   avery        — Avery Berkel FX / XI
+#   rahul        — fixed-width +00000.000kg style
+
+protocol = "generic"
+baud_rate = 9600
+data_bits = 8
+parity = "none"       # none | odd | even
+stop_bits = 1
+stable_reads = 3      # consecutive identical readings before stable=true
+stable_window_ms = 200
+
+# ── Diagnostics ───────────────────────────────────────────────────────────────
+# curl http://127.0.0.1:8765/health
+# curl http://127.0.0.1:8765/scale/weight   # check "raw" if kg is null
+# Logs: ~/Library/Logs/efact-hardware-agent/agent.log (macOS)
+#       ~/.local/share/efact-hardware-agent/agent.log or journalctl (Linux)

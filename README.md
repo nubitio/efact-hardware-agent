@@ -1,19 +1,19 @@
 # efact-hardware-agent
 
-Agente local de hardware para [eFact](https://github.com/nubitio). Conecta el POS web con periféricos que el navegador no puede acceder directamente:
+Local hardware agent for [eFact](https://github.com/nubitio). Bridges the web POS to peripherals the browser cannot access directly:
 
-- **Impresoras térmicas** ESC/POS (USB HID o spooler del sistema)
-- **Balanzas RS-232** (stream continuo, protocolos comerciales)
+- **Thermal printers** — ESC/POS via USB HID or the OS print spooler
+- **RS-232 scales** — continuous weight stream with multiple vendor parsers
 
-## Arquitectura
+## Architecture
 
 ```
-eFact Web POS  →  localhost:8765  →  efact-hardware-agent  →  impresora / puerto serie
+eFact Web POS  →  127.0.0.1:8765  →  efact-hardware-agent  →  printer / serial port
 ```
 
-El agente corre en segundo plano en la máquina del cajero. El POS lo detecta vía `print_method = LOCAL_AGENT` y consulta peso con `GET /scale/weight`.
+The agent runs in the background on the cashier machine. The POS uses `print_method = LOCAL_AGENT` and reads weight from `GET /scale/weight`.
 
-## Instalación
+## Install
 
 ### Linux / macOS
 
@@ -27,122 +27,108 @@ curl -fsSL https://raw.githubusercontent.com/nubitio/efact-hardware-agent/main/i
 iwr -useb https://raw.githubusercontent.com/nubitio/efact-hardware-agent/main/install.ps1 | iex
 ```
 
-El instalador descarga el binario, escribe `config.toml`, registra autostart y en macOS usa `ActivationPolicy::Accessory` para **no mostrar icono en el Dock**.
+The installer downloads the binary, writes `config.toml`, copies `config.toml.example` (reference, never overwritten on save), and registers autostart. On macOS the agent uses `ActivationPolicy::Accessory` so **no Dock icon** appears.
 
 ## API
 
-### Impresión
+### Printer
 
-| Método | Endpoint    | Descripción                    |
-|--------|-------------|--------------------------------|
-| GET    | `/health`   | Estado del agente y servicios  |
-| GET    | `/printers` | Impresoras HID y del sistema   |
-| POST   | `/print`    | Bytes ESC/POS (`octet-stream`) |
+| Method | Endpoint    | Description              |
+|--------|-------------|--------------------------|
+| GET    | `/health`   | Agent and service status |
+| GET    | `/config`   | Current configuration    |
+| PUT    | `/config`   | Update printer / scale   |
+| GET    | `/printers` | HID and system printers  |
+| POST   | `/print`    | ESC/POS bytes (`application/octet-stream`) |
 
-### Balanza
+### Scale
 
-| Método | Endpoint            | Descripción                              |
-|--------|---------------------|------------------------------------------|
-| GET    | `/scale/protocols`  | Protocolos soportados                    |
-| GET    | `/scale/ports`      | Puertos serie disponibles                |
-| GET    | `/scale/status`     | Conexión, protocolo, último error        |
-| GET    | `/scale/weight`     | Peso actual `{ kg, stable, raw, … }`     |
+| Method | Endpoint           | Description                        |
+|--------|--------------------|------------------------------------|
+| GET    | `/scale/protocols` | Supported protocol IDs             |
+| GET    | `/scale/ports`     | Available serial ports             |
+| GET    | `/scale/status`    | Connection, protocol, last error   |
+| GET    | `/scale/weight`    | `{ kg, stable, raw, … }`           |
 
-`GET /scale/weight` devuelve `stable: true` cuando el peso se mantiene estable el número de lecturas configurado en `stable_reads`.
+`stable: true` when the weight matches for `stable_reads` consecutive samples within `stable_window_ms`.
 
-## Configuración
+## Configuration
 
-Ubicaciones (en orden):
+**Live file:** `config.toml` — edited by the POS or the agent; comments are stripped on save.
 
-1. Junto al binario (`config.toml`)
-2. `~/.config/efact-hardware-agent/config.toml` (Linux/macOS)
+**Reference:** `config.toml.example` — English commented template; safe to keep open while editing; refreshed on reinstall.
+
+Search order:
+
+1. `config.toml` next to the binary
+2. `~/.config/efact-hardware-agent/config.toml` (Linux / macOS)
 3. `%APPDATA%\efact-hardware-agent\config.toml` (Windows)
 
-La ruta legada `efact-printer-agent` sigue leyéndose para upgrades.
+Legacy `efact-printer-agent` paths are still read for upgrades.
 
-```toml
-port = 8765
+### End users (POS)
 
-# Impresora (campos planos, compatibles con configs anteriores)
-# usb_vendor_id = "04b8"
-# system_printer_name = "POS_D_BASIC_230"
+Open **Hardware local** in the POS header — printer spooler toggle, scale port, live weight. Basic settings persist automatically.
 
-[scale]
-enabled = true
-serial_port = "COM3"              # Windows
-# serial_port = "/dev/ttyUSB0"    # Linux
-# serial_port = "/dev/cu.usbserial-1410"  # macOS
-protocol = "excell"
-baud_rate = 9600
-data_bits = 8
-parity = "none"
-stop_bits = 1
-stable_reads = 3
-stable_window_ms = 200
+### Technicians (advanced)
+
+1. Tray icon → **Abrir configuración** (opens the config folder)
+2. Read **`config.toml.example`** for field reference and protocol IDs
+3. Edit **`config.toml`** for protocol, baud rate, USB vendor IDs, etc.
+4. Diagnose with:
+
+```bash
+curl http://127.0.0.1:8765/health
+curl http://127.0.0.1:8765/scale/ports
+curl http://127.0.0.1:8765/scale/weight   # inspect "raw" when kg is null
 ```
 
-### Protocolos de balanza
+If `raw` shows garbage, try `baud_rate = 4800` or a vendor-specific `protocol` (see example file).
 
-| ID | Marcas / uso |
-|----|----------------|
-| `excell` | **Excell** (default, stream continuo ASCII — común en Perú) |
-| `generic` | Cualquier balanza que envíe un número con unidad |
+### Scale protocols
+
+| ID | Typical hardware |
+|----|------------------|
+| `generic` | **Default** — first decimal in each line |
+| `excell` | Excell continuous ASCII (Peru retail) |
 | `cas` | CAS CI / LP / ER |
 | `toledo` | Mettler Toledo Prix, PS, Tiger |
-| `toledo_stx` | Toledo con tramas STX…ETX |
+| `toledo_stx` | Toledo STX…ETX frames |
 | `mettler_sics` | Mettler MT-SICS |
-| `dibal` | Dibal G/M/L (retail) |
+| `dibal` | Dibal G/M/L |
 | `kretz` | Kretz ARS / eKO (LATAM) |
 | `magellan` | Magellan / Datalogic |
 | `avery` | Avery Berkel |
-| `rahul` | Formato fijo `+00000.000kg` (variante china) |
+| `rahul` | `+00000.000kg` fixed-width variants |
 
-Lista completa: `GET http://localhost:8765/scale/protocols`
+Full list: `GET http://127.0.0.1:8765/scale/protocols`
 
-### Configurar balanza Excell (sin modelo exacto)
+## Port 8765 conflict (Docker / dev)
 
-1. Conectar adaptador USB ↔ RS-232
-2. `GET /scale/ports` para ver el puerto
-3. Dejar `protocol = "excell"` y `baud_rate = 9600`
-4. Si el peso no parsea, probar `generic` o capturar una línea cruda desde `raw` en `/scale/weight`
+The agent listens on **`127.0.0.1:8765` only**. If Docker maps another service to `*:8765`, `http://localhost:8765` may hit Symfony (404) instead of the agent because macOS resolves `localhost` to IPv6 first.
 
-## Conflicto de puerto 8765 (Docker / dev)
-
-El agente escucha en `127.0.0.1:8765`. Si Docker o el stack de desarrollo de eFact publica otro servicio en `*:8765`, las peticiones a `http://localhost:8765` pueden ir a Symfony (404) en lugar del agente.
-
-**Solución:** el POS usa `http://127.0.0.1:8765`. Para probar manualmente:
+**Fix:** the POS uses `http://127.0.0.1:8765`. Manual check:
 
 ```bash
 curl http://127.0.0.1:8765/health
 ```
 
-Si necesitas liberar el puerto, revisa `docker compose ps` y el mapeo `8765:8765`.
-
-## Compilar
+## Build
 
 ```bash
 cargo build --release
-# binario en target/release/efact-hardware-agent
+# binary: target/release/efact-hardware-agent
 ```
 
-**Requisitos:** Rust 1.75+, `libudev-dev` en Linux.
+**Requirements:** Rust 1.75+, `libudev-dev` on Linux.
 
-## Configuración
+## Migration from efact-printer-agent
 
-Puedes configurar el agente de dos formas:
+- Binary renamed to `efact-hardware-agent`
+- Installer keeps a `efact-printer-agent` symlink to the new binary
+- Legacy configs under `~/.config/efact-printer-agent/` still work
+- Same listen address: `127.0.0.1:8765`
 
-1. **POS web** — botón *Hardware local* en el header del POS (`GET/PUT /config`)
-2. **Bandeja del sistema** — menú → *Abrir configuración* (abre la carpeta con `config.toml`)
-
-Un panel nativo de configuración en Rust (ventana propia del agente) está planificado; por ahora el POS web cubre impresora, balanza y guía de cableado.
-
-## Migración desde efact-printer-agent
-
-- Binario renombrado a `efact-hardware-agent`
-- El instalador crea symlink `efact-printer-agent` → nuevo binario
-- Configs legadas en `~/.config/efact-printer-agent/` siguen funcionando
-- Misma URL: `http://localhost:8765`
-
-## Licencia
+## License
 
 MIT

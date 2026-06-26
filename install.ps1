@@ -38,14 +38,21 @@ New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
 Copy-Item (Join-Path $TMP $BINARY) (Join-Path $INSTALL_DIR $BINARY) -Force
 Copy-Item (Join-Path $TMP $BINARY) (Join-Path $INSTALL_DIR $LEGACY) -Force
 
+New-Item -ItemType Directory -Path $CONFIG_DIR -Force | Out-Null
+
 if (-not (Test-Path (Join-Path $CONFIG_DIR "config.toml"))) {
-    New-Item -ItemType Directory -Path $CONFIG_DIR -Force | Out-Null
     if (Test-Path (Join-Path $LEGACY_CONFIG "config.toml")) {
         Copy-Item (Join-Path $LEGACY_CONFIG "config.toml") (Join-Path $CONFIG_DIR "config.toml")
         Write-Info "Migrated config from $LEGACY_CONFIG"
     } else {
         Copy-Item (Join-Path $TMP "config.toml") (Join-Path $CONFIG_DIR "config.toml")
     }
+}
+
+$exampleSrc = Join-Path $TMP "config.toml.example"
+if (Test-Path $exampleSrc) {
+    Copy-Item $exampleSrc (Join-Path $CONFIG_DIR "config.toml.example") -Force
+    Write-Ok "Reference config: $(Join-Path $CONFIG_DIR 'config.toml.example')"
 }
 
 $TASK_NAME = "efact-hardware-agent"
@@ -57,5 +64,5 @@ Unregister-ScheduledTask -TaskName "efact-printer-agent" -Confirm:$false -ErrorA
 Start-ScheduledTask -TaskName $TASK_NAME
 
 Write-Ok "efact-hardware-agent $TAG installed successfully."
-Write-Ok "Agent running on http://localhost:8765"
+Write-Ok "Agent running on http://127.0.0.1:8765"
 Write-Ok "Config: $(Join-Path $CONFIG_DIR 'config.toml')"
